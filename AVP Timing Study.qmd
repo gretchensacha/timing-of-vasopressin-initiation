@@ -15,11 +15,6 @@ format:
     theme: zephyr
 ---
 
-# TO DO
-- Secondary outcomes
-    - Hemodynamic Response (simple logistic regression but can evaluate the linear relationship first to ensure no splines or segmented regression needed)
-    - SOFA Score Change (interaction? linear regression)
-
 # Load Packages and Set Theme {.unnumbered}
 
 ```{r setup-library-load}

@@ -15,6 +15,11 @@ format:
     theme: zephyr
 ---
 
+# TO DO
+- Secondary outcomes
+    - Hemodynamic Response (simple logistic regression but can evaluate the linear relationship first to ensure no splines or segmented regression needed)
+    - SOFA Score Change (interaction? linear regression)
+
 # Load Packages and Set Theme {.unnumbered}
 
 ```{r setup-library-load}
@@ -41,6 +46,8 @@ conflict_prefer("filter", "dplyr")
 conflicts_prefer(dplyr::lag)
 conflicts_prefer(dplyr::recode)
 conflicts_prefer(dplyr::rename)
+conflicts_prefer(dplyr::select)
+conflicts_prefer(dplyr::select)
 conflicts_prefer(rms::Predict)
 conflicts_prefer(base::max)
 conflicts_prefer(base::sum)
@@ -505,7 +512,7 @@ ggplot(pred.neq) +
   geom_line(aes(x=neqdoseatavp, y = prob)) +
   geom_ribbon(aes(x=neqdoseatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Norepinephrine-equivalent dose at vasopressin initiation, mcg/min') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_x_continuous(breaks=seq(0,160,by=20), limits=c(0,160)) +
   scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
@@ -525,7 +532,7 @@ ggplot(pred.lac) +
   geom_line(aes(x=lactateatavp, y = prob)) +
   geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
 ```
@@ -545,55 +552,50 @@ ggplot(pred.time) +
   geom_line(aes(x=timefromshockonset_hr, y = prob)) +
   geom_ribbon(aes(x=timefromshockonset_hr, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Time from shock onset, hours') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
 ```
 
 ### Segmented Regression
-Similar to methods previously preformed in our initial study, piecewise segmented regression was utilized to determine the breakpoint at which the relationship between norepinephrine-equivalent dose at vasopressin initiation and in-hospital mortality changed.  This method estimates the change point of slope in NEQ-dose at AVP initiation, or the point at which the odds ratio of the association between NEQ-dose at AVP initiation and in-hospital mortality changes. The change point was detected at a NEQ dose of 39.5 mcg/min. This method utilized the segmented package and the [segmented function in R](https://cran.r-project.org/web/packages/segmented/segmented.pdf)
+Similar to methods previously preformed in our initial study, piecewise segmented regression was utilized to determine the breakpoint at which the relationship between each of the three variables of interest and in-hospital mortality changed. This method estimates the change point of slope in NEQ-dose at AVP initiation (as an example), or the point at which the odds ratio of the association between NEQ-dose at AVP initiation and in-hospital mortality changes. The change point was detected at a NEQ dose of 39.5 mcg/min. No meaningful change point was detected for time duration from shock onset, therefore, only NEQ-dose and lactate concentration were evaluated. This method utilized the segmented package and the [segmented function in R](https://cran.r-project.org/web/packages/segmented/segmented.pdf)
 ```{r}
-segavptime <- segmented(avptime, ~neqdoseatavp, control=seg.control(size.boot = 8000, display=TRUE, seed=1234))
+segavptime <- segmented(avptime, ~neqdoseatavp+lactateatavp, control=seg.control(size.boot = 8000, display=TRUE, seed=1234))
 summary.segmented(segavptime)
 ```
 
 With an associated estimated 95% Confidence interval for the change point of:
 ```{r}
 # 95% CI for change point
-confint.segmented(segavptime)
+confint(segavptime,"neqdoseatavp")
+confint(segavptime,"lactateatavp")
 ```
+
 #### Converting beta coefficients to Odds Ratios
 Will only be reporting the odds ratio with corresponding 95% confidence intervals for the three variables of interest and the remaining independent variables included in the model are only noted as confounders that were adjusted for in the final model. The association of these independent variables on the dependent outcome (in-hospital mortality) is not relavent to this study. 
 
-##### Norepinephrine-Equivalent Dose at Vasopressin Initiation
+##### Norepinephrine-Equivalent Dose and Lactate at Vasopressin Initiation
 *Adjusting the units of the variable from 1 to 10 mcg/min*\
-Slope 1 is the OR with 95% CI up until the change point of 39.5 mcg/min. Slope 2 is the OR with 95% CI for all doses after the change point of 39.5 mcg/min. The OR reference unit is for every 10 mcg/min increase in the NEQ dose at the time of AVP initiation.  
+Slope 1 is the OR with 95% CI up until the change point of 39.5 mcg/min or 8.29 mmol/L. Slope 2 is the OR with 95% CI for all doses after the change point of 39.5 mcg/min or 8.92 mmol/L. The OR reference unit for NEQ-dose is for every 10 mcg/min increase in the NEQ dose at the time of AVP initiation and 1 mool/L for lactate concentration.  
 ```{r}
 segoutput <- as.data.frame(slope(segavptime)) %>%
-  mutate(OR = exp(neqdoseatavp.Est.)^10,
-         LB95CI = exp(neqdoseatavp.CI.95...l)^10,
-         UB95CI = exp(neqdoseatavp.CI.95...u)^10) %>%
-  select(OR, LB95CI, UB95CI)
+  mutate(NEQOR = exp(neqdoseatavp.Est.)^10,
+         NEQLB95CI = exp(neqdoseatavp.CI.95...l)^10,
+         NEQUB95CI = exp(neqdoseatavp.CI.95...u)^10) %>%
+ mutate(lacOR = exp(lactateatavp.Est.),
+         lacLB95CI = exp(lactateatavp.CI.95...l),
+         lacUB95CI = exp(lactateatavp.CI.95...u)) %>%
+  select(NEQOR, NEQLB95CI, NEQUB95CI, lacOR, lacLB95CI, lacUB95CI)
 segoutput
 ```
 
-##### Lactate Concentration at Vasopressin Initiation
-*The units of lactate are 1 mmol/L*\
-The first line of code is the odds ratio for the lactate concentration at AVP initiation with the second and third line being the lower and upper bound of the 95% confidence interval. 
-```{r}
-#| warning: false
-#| message: false
-model <- summary.segmented(segavptime)
-exp(model$coefficients[3,1])
-exp(model$coefficients[3,1] - 1.96*model$coefficients[3,2]) # lower bound of 95% CI
-exp(model$coefficients[3,1] + 1.96*model$coefficients[3,2]) # upper bound of 95% CI
-```
 ##### Timing between Shock Onset and Vasopressin Initiation 
 *The units of time are 1 hour*\
 The first line of code is the odds ratio for the time between shock onset and AVP initiation with the second and third line being the lower and upper bound of the 95% confidence interval. 
 ```{r}
 #| warning: false
 #| message: false
+model <- summary.segmented(segavptime)
 exp(model$coefficients[4,1])
 exp(model$coefficients[4,1] - 1.96*model$coefficients[4,2]) # lower bound of 95% CI
 exp(model$coefficients[4,1] + 1.96*model$coefficients[4,2]) # upper bound of 95% CI
@@ -627,7 +629,7 @@ ggplot(pred.neq) +
                arrow = arrow(length = unit(0.15, "cm"), type="closed")) +
   geom_text(data=ds.knots.ca, aes(x=knots.ca, y=arrow.y+0.01, label=knots.ca), size=3) +
   xlab('Norepinephrine-equivalent dose at vasopressin initiation, mcg/min') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_x_continuous(breaks=seq(0,200,by=20), limits=c(0,200)) +
   scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
@@ -650,13 +652,25 @@ pred.lac$prob <- logistic(pred.lac.1$fit)
 pred.lac$prob.lower <- logistic(pred.lac.1$fit-1.96*pred.lac.1$se.fit)
 pred.lac$prob.upper <- logistic(pred.lac.1$fit+1.96*pred.lac.1$se.fit)
 
+knots.lac <- 8.3
+ypos.lac <- 0.815
+arrow.y <- 0.95
+arrow.yend <-ypos.lac+0.01
+ds.knots.lac <- as.data.frame(cbind(knots.lac,ypos.lac,arrow.y,arrow.yend))
+
 ggplot(pred.lac) + 
   geom_line(aes(x=lactateatavp, y = prob)) + 
   geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
+  geom_point(data=ds.knots.lac, aes(x=knots.lac,y=ypos.lac)) +
+  geom_segment(data=ds.knots.lac, aes(x=knots.lac, xend=knots.lac, y=arrow.y, yend=arrow.yend), 
+               color="grey30", size=0.5, linetype="longdash",
+               arrow = arrow(length = unit(0.15, "cm"), type="closed")) +
+  geom_text(data=ds.knots.lac, aes(x=knots.lac, y=arrow.y+0.01, label=knots.lac), size=3) +
   xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
-  ylab('Predicted rate of in-hospital mortality, %') +
+  ylab('Predicted incidence of in-hospital mortality, %') +
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
+
 ```
 
 #### Time from Shock Onset Predictive In-hospital Mortality Plot
@@ -677,13 +691,92 @@ ggplot(pred.time) +
   geom_line(aes(x=timefromshockonset_hr, y = prob)) + 
   geom_ribbon(aes(x=timefromshockonset_hr, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
   xlab('Time from shock onset, hours') + 
-  ylab('Predicted rate of in-hospital mortality, %') +
+  ylab('Predicted incidence of in-hospital mortality, %') +
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
 
 ```
 
 ## Exploratory Analyses
+
+### Hemodynamic Response Regression
+```{r}
+#| warning: false
+#| message: false
+avptimehds <- glm(hds~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, family = binomial(link = "logit"), data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+
+tidy(avptimehds, exponentiate = TRUE, conf.int = TRUE, conf.level = 0.95) %>% select(term, estimate, std.error, low95=conf.low, high95=conf.high)
+```
+Fitting logistic regression with cubic splines using 3 nodes for each of our three variables of interest in order to determine if there is a non-linear trend. The ANOVA test shows that there is no presence of non-linearity between our three variables of interest. Therefore, RCS is not needed for evaluation of this outcome.
+```{r}
+fulldfmodsepsis3 <- fulldf %>% filter(include_exclude_sepsis3nomapbosch == "include")
+fulldfmodsepsis3$inhospital_mortality <- droplevels(fulldfmodsepsis3$inhospital_mortality) # dropping unused level "Unknown"
+fulldfmodsepsis3$gender <- droplevels(fulldfmodsepsis3$gender) # dropping unused level "Unknown"
+ddist <- datadist(fulldfmodsepsis3)
+options(datadist='ddist')
+
+cubavphds <- lrm(hds~ rcs(neqdoseatavp,3) + rcs(lactateatavp,3) + rcs(timefromshockonset_hr,3) + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldfmodsepsis3, x=TRUE, y=TRUE)
+
+anova(cubavphds)
+```
+
+Creating plot of the predicted hemodynamic response at each lactate concentration at the time of AVP initiation setting all confounding variables at their median values or specified the categorical data point as in prior studies
+```{r}
+pred.lac <- data.frame(lactateatavp = seq(0,30,by = 0.01)) # sequence of lactate values at AVP initiation starting at 0
+
+# setting values as median unless otherwise specified
+pred.lacdf <- data.frame(lactateatavp = seq(0,30,by = 0.01), neqdoseatavp = 28.4, timefromshockonset_hr = 5.6, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=10, totalfluidbolus = 1000, fluidbalance=8500, immune_suppression="No", 
+                         iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male")
+
+pred.lac.1 <- predict(avptimehds, newdata = pred.lacdf, se.fit=TRUE)
+logistic <- plogis
+pred.lac$prob <- logistic(pred.lac.1$fit)
+pred.lac$prob.lower <- logistic(pred.lac.1$fit-1.96*pred.lac.1$se.fit)
+pred.lac$prob.upper <- logistic(pred.lac.1$fit+1.96*pred.lac.1$se.fit)
+
+ggplot(pred.lac) + 
+  geom_line(aes(x=lactateatavp, y = prob)) + 
+  geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
+  xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
+  ylab('Predicted incidence of Hemodynamic Response, %') +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
+  theme_light()
+
+```
+Interaction analysis - no interaction detected between any of the three variables of interest
+```{r}
+avptimehdsixn1 <- glm(hds~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse + neqdoseatavp:lactateatavp, family = binomial(link = "logit"), data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+anova(avptimehds,avptimehdsixn1) # LR test statistic = 0.0014
+1-qchisq(0.0014086,1) # corresponding p-value 0.999
+
+avptimehdsixn2 <- glm(hds~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse + neqdoseatavp:timefromshockonset_hr, family = binomial(link = "logit"), data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+anova(avptimehds,avptimehdsixn2) # LR test statistic = 0.4439
+1-qchisq(0.44397,1) # corresponding p-value 0.653
+
+avptimehdsixn3 <- glm(hds~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse + lactateatavp:timefromshockonset_hr, family = binomial(link = "logit"), data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+anova(avptimehds,avptimehdsixn3) # LR test statistic = 0.264
+1-qchisq(0.26423,1) # corresponding p-value 0.886
+```
+
+### SOFA Score Change
+```{r}
+avptimesofachange <- lm(sofa_change~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+
+tidy(avptimesofachange, conf.int = TRUE, conf.level = 0.95) %>% select(term, estimate, std.error, low95=conf.low, high95=conf.high) %>% mutate(estimate = ifelse(term == "neqdoseatavp", estimate*10, estimate), low95 = ifelse(term == "neqdoseatavp", low95*10, low95), high95 = ifelse(term == "neqdoseatavp", high95*10, high95)) # Converting NEQ dose to 10 mcg/min increase in dose
+```
+
+Interaction analysis - no interaction detected between any of the three variables of interest
+```{r}
+avptimesofaixn1 <- lm(sofa_change~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse + neqdoseatavp:lactateatavp, data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+anova(avptimesofachange,avptimesofaixn1) # p-value 0.5211
+
+avptimesofaixn2 <- lm(sofa_change~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse + neqdoseatavp:timefromshockonset_hr, data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+anova(avptimesofachange,avptimesofaixn2) # LR test statistic = 0.4165
+
+avptimesofaixn3 <- lm(sofa_change~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse + lactateatavp:timefromshockonset_hr, data = fulldf, subset = include_exclude_sepsis3nomapbosch == "include")
+anova(avptimesofachange,avptimesofaixn3) # LR test statistic = 0.521
+```
+
 ### Quantile Plot
 ```{r}
 quantileplot <- fulldf %>% 
@@ -1043,7 +1136,82 @@ cubavptime2 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,3) + lactateatavp + ti
 summary(cubavptime2)
 ```
 
-##### Values of where splines placed knots
+Evaluation of non-linear test using analysis of variance reveals a p-value of 0.0094 indicating and supporting the presence of a non-linear trend with NEQ-dose at vasopressin initiation. Evaluating only NE-equivalent dose with restricted cubic splines as no detected non-linear trend with lactate at vasopressin initiation (p-value for nonlinear trend of 0.1705) or timing from shock onset (p-value for nonlinear trend of 0.3237): data not shown but can be reran if needed.
+```{r}
+anova(cubavptime2)
+```
+
+#### Evaluation of the number of nodes (3 vs. 4 vs. 5)
+Now run the model with `glm()` instead of `lrm()` to be able to easily get fit parameters.
+
+```{r}
+cubavptime_g3 <- glm(inhospital_mortality~ rcs(neqdoseatavp,3) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, 
+                    data = fulldfsepsis3, 
+                    family =binomial(link =logit))
+```
+
+Next, run the model with 4 and 5 knots in the spline instead of 3 (using both `lrm()` and `glm()`).
+
+```{r}
+cubavptime_l4 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,4) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldfsepsis3, x=TRUE, y=TRUE)
+
+cubavptime_g4 <- glm(inhospital_mortality~ rcs(neqdoseatavp,4) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, 
+                    data = fulldfsepsis3, 
+                    family =binomial(link =logit))
+
+cubavptime_l5 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,3) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldfsepsis3, x=TRUE, y=TRUE)
+
+cubavptime_g5 <- glm(inhospital_mortality~ rcs(neqdoseatavp,5) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, 
+                    data = fulldfsepsis3, 
+                    family =binomial(link =logit))
+```
+
+Now store fit statistics (AIC and BIC) for the models.
+
+```{r}
+temp1 <- bind_rows(glance(cubavptime_g3), 
+                   glance(cubavptime_g4),
+                   glance(cubavptime_g5)) |>
+  mutate(model = c("3 knots", "4 knots", "5 knots"),
+         AIC = round_half_up(AIC, 0),
+         BIC = round_half_up(BIC, 0)) |>
+  select(model, AIC, BIC)
+```
+
+Now validate the model fit (summary statistics) using bootstrap resampling (40 resamples). 
+
+```{r}
+set.seed(1234)
+val3 <- validate(cubavptime, B = 40)
+val4 <- validate(cubavptime_l4, B = 40)
+val5 <- validate(cubavptime_l5, B = 40)
+```
+
+Singularity created due to the ESRD variable due to few observations in this category. Nothing much to worry about in this regard.
+
+Now will show the validated fit parameters.
+
+```{r}
+val_1 <- bind_rows(val3[1,], val4[1,], val5[1,]) |>
+  mutate(model = c("3 knots", "4 knots", "5 knots"),
+         AUC_nominal = round_half_up(0.5 + (index.orig/2),4),
+         AUC_validated = round_half_up(0.5 + (index.corrected/2),4)) |>
+select(model, AUC_nominal, AUC_validated)
+
+val_2 <- bind_rows(val3[2,], val4[2,], val5[2,]) |>
+  mutate(model = c("3 knots", "4 knots", "5 knots"),
+         R2_nominal = round_half_up(index.orig,4),
+         R2_validated = round_half_up(index.corrected,4)) |>
+select(model, R2_nominal, R2_validated)
+
+temp2 <- left_join(temp1, val_1, by = "model")
+(val <- left_join(temp2, val_2, by = "model"))
+```
+
+Looks like the fit is very similar between all of the models. It's splitting hairs, but the AIC and BIC are best (lowest) for the 3 knot model, and the validated AUC and Nagelkerke *R^2^* are best (highest) for the 5 knot model. Any choice would be reasonable here, so will keep the 3 knot model since all of the work is already done.
+
+
+#### Values of where splines placed knots
 We can see the splines placed their knots at NEQ dose at AVP initiation of 9.0, 28.37, and 72.00 mcg/min
 ```{r}
 knots <- attributes(rcs(fulldfsepsis3$neqdoseatavp,3))
@@ -1134,7 +1302,7 @@ ggplot(pred.neq) +
   geom_line(aes(x=neqdoseatavp, y = prob)) +
   geom_ribbon(aes(x=neqdoseatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Norepinephrine-equivalent dose at vasopressin initiation, mcg/min') + 
-  ylab('Predicted probability of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_x_continuous(breaks=seq(0,160,by=20), limits=c(0,160)) +
   scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
@@ -1154,7 +1322,8 @@ ggplot(pred.lac) +
   geom_line(aes(x=lactateatavp, y = prob)) +
   geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
-  ylab('Predicted probability of in-hospital mortality, %') +
+  ylab('Predicted incidence of in-hospital mortality, %')+
+  scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
 ```
 
@@ -1172,55 +1341,49 @@ ggplot(pred.time) +
   geom_line(aes(x=timefromshockonset_hr, y = prob)) +
   geom_ribbon(aes(x=timefromshockonset_hr, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Time from shock onset, hours') + 
-  ylab('Predicted probability of in-hospital mortality, %') +
+  ylab('Predicted incidence of in-hospital mortality, %')+
+  scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
 ```
 
 ### Segmented Regression
-Similar to methods previously preformed in our initial study, piecewise segmented regression was utilized to determine the breakpoint at which the relationship between norepinephrine-equivalent dose at vasopressin initiation and in-hospital mortality changed.  This method estimates the change point of slope in NEQ-dose at AVP initiation, or the point at which the odds ratio of the association between NEQ-dose at AVP initiation and in-hospital mortality changes. The change point was detected at a NEQ dose of 37.9 mcg/min. This method utilized the segmented package and the [segmented function in R](https://cran.r-project.org/web/packages/segmented/segmented.pdf)
+Similar to methods previously preformed in our initial study, piecewise segmented regression was utilized to determine the breakpoint at which the relationship between norepinephrine-equivalent dose at vasopressin initiation and in-hospital mortality changed.  This method estimates the change point of slope in NEQ-dose at AVP initiation (as an example), or the point at which the odds ratio of the association between NEQ-dose at AVP initiation and in-hospital mortality changes. The change point was detected at a NEQ dose of 37.9 mcg/min and at a lactate concentration of 5.72 mmol/L. No break point was detected with time duration from shock onset. This method utilized the segmented package and the [segmented function in R](https://cran.r-project.org/web/packages/segmented/segmented.pdf)
 ```{r}
-segavptime2 <- segmented(avptime2, ~neqdoseatavp, control=seg.control(size.boot = 8000, display=TRUE, seed=1234))
+segavptime2 <- segmented(avptime2, ~neqdoseatavp+lactateatavp, control=seg.control(size.boot = 8000, display=TRUE, seed=1234))
 summary.segmented(segavptime2)
 ```
 
 With an associated estimated 95% Confidence interval for the change point of:
 ```{r}
 # 95% CI for change point
-confint.segmented(segavptime2)
+confint(segavptime2,"neqdoseatavp")
+confint(segavptime2,"lactateatavp")
 ```
 
 #### Converting beta coefficients to Odds Ratios
 Will only be reporting the odds ratio with corresponding 95% confidence intervals for the three variables of interest and the remaining independent variables included in the model are only noted as confounders that were adjusted for in the final model. The association of these independent variables on the dependent outcome (in-hospital mortality) is not relevant to this study. 
 
 
-##### Norepinephrine-Equivalent Dose at Vasopressin Initiation
+##### Norepinephrine-Equivalent Dose and Lactate at Vasopressin Initiation
 *Adjusting the units of the variable from 1 to 10 mcg/min*\
-Slope 1 is the OR with 95% CI up until the change point of 37.2 mcg/min. Slope 2 is the OR with 95% CI for all doses after the change point of 39 mcg/min. The OR reference unit is for every 10 mcg/min increase in the NEQ dose at the time of AVP initiation.  
+Slope 1 is the OR with 95% CI up until the change point of 37.2 mcg/min. Slope 2 is the OR with 95% CI for all doses after the change point of 38 mcg/min or 5.7 mmol/L. The OR reference unit is for every 10 mcg/min increase in the NEQ dose at the time of AVP initiation and for every 1 mmol/L increase in the lactate concentration at the time of AVP initiation. 
 ```{r}
 segoutput2 <- as.data.frame(slope(segavptime2)) %>%
-  mutate(OR = exp(neqdoseatavp.Est.)^10,
-         LB95CI = exp(neqdoseatavp.CI.95...l)^10,
-         UB95CI = exp(neqdoseatavp.CI.95...u)^10) %>%
-  select(OR, LB95CI, UB95CI)
+  mutate(NEQOR = exp(neqdoseatavp.Est.)^10,
+         NEQLB95CI = exp(neqdoseatavp.CI.95...l)^10,
+         NEQUB95CI = exp(neqdoseatavp.CI.95...u)^10) %>%
+ mutate(lacOR = exp(lactateatavp.Est.),
+         lacLB95CI = exp(lactateatavp.CI.95...l),
+         lacUB95CI = exp(lactateatavp.CI.95...u)) %>%
+  select(NEQOR, NEQLB95CI, NEQUB95CI, lacOR, lacLB95CI, lacUB95CI)
 segoutput2
 ```
-
-
-##### Lactate Concentration at Vasopressin Initiation
-*The units of lactate are 1 mmol/L*\
-The first line of code is the odds ratio for the lactate concentration at AVP initiation with the second and third line being the lower and upper bound of the 95% confidence interval.
-```{r}
-model2 <- summary.segmented(segavptime2)
-exp(model2$coefficients[3,1])
-exp(model2$coefficients[3,1] - 1.96*model2$coefficients[3,2]) # lower bound of 95% CI
-exp(model2$coefficients[3,1] + 1.96*model2$coefficients[3,2]) # upper bound of 95% CI
-```
-
 
 ##### Timing between Shock Onset and Vasopressin Initiation 
 *The units of time are 1 hour*\
 The first line of code is the odds ratio for the time between shock onset and AVP initiation with the second and third line being the lower and upper bound of the 95% confidence interval.
 ```{r}
+model2 <- summary.segmented(segavptime2)
 exp(model2$coefficients[4,1])
 exp(model2$coefficients[4,1] - 1.96*model2$coefficients[4,2]) # lower bound of 95% CI
 exp(model2$coefficients[4,1] + 1.96*model2$coefficients[4,2]) # upper bound of 95% CI
@@ -1240,8 +1403,8 @@ pred.neq$prob <- logistic(pred.neq.1$fit)
 pred.neq$prob.lower <- logistic(pred.neq.1$fit-1.96*pred.neq.1$se.fit)
 pred.neq$prob.upper <- logistic(pred.neq.1$fit+1.96*pred.neq.1$se.fit)
 
-knots.ca <- 37.9
-ypos.ca <- 0.70
+knots.ca <- 38.0
+ypos.ca <- 0.705
 arrow.y <- 0.90
 arrow.yend <-ypos.ca+0.01
 ds.knots.ca <- as.data.frame(cbind(knots.ca,ypos.ca,arrow.y,arrow.yend))
@@ -1255,7 +1418,7 @@ ggplot(pred.neq) +
                arrow = arrow(length = unit(0.15, "cm"), type="closed")) +
   geom_text(data=ds.knots.ca, aes(x=knots.ca, y=arrow.y+0.01, label=knots.ca), size=3) +
   xlab('Norepinephrine-equivalent dose at vasopressin initiation, mcg/min') + 
-  ylab('Predicted probability of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_x_continuous(breaks=seq(0,200,by=20), limits=c(0,200)) +
   scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
@@ -1275,12 +1438,25 @@ pred.lac$prob <- logistic(pred.lac.1$fit)
 pred.lac$prob.lower <- logistic(pred.lac.1$fit-1.96*pred.lac.1$se.fit)
 pred.lac$prob.upper <- logistic(pred.lac.1$fit+1.96*pred.lac.1$se.fit)
 
+knots.lac <- 5.7
+ypos.lac <- 0.73
+arrow.y <- 0.90
+arrow.yend <-ypos.lac+0.01
+ds.knots.lac <- as.data.frame(cbind(knots.lac,ypos.lac,arrow.y,arrow.yend))
+
 ggplot(pred.lac) + 
   geom_line(aes(x=lactateatavp, y = prob)) + 
   geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
+  geom_point(data=ds.knots.lac, aes(x=knots.lac,y=ypos.lac)) +
+  geom_segment(data=ds.knots.lac, aes(x=knots.lac, xend=knots.lac, y=arrow.y, yend=arrow.yend), 
+               color="grey30", size=0.5, linetype="longdash",
+               arrow = arrow(length = unit(0.15, "cm"), type="closed")) +
+  geom_text(data=ds.knots.lac, aes(x=knots.lac, y=arrow.y+0.01, label=knots.lac), size=3) +
   xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
-  ylab('Predicted probability of in-hospital mortality, %') +
+  ylab('Predicted incidence of in-hospital mortality, %') +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
+
 ```
 
 #### Time from Shock Onset Predictive In-hospital Mortality Plot
@@ -1301,7 +1477,7 @@ ggplot(pred.time) +
   geom_line(aes(x=timefromshockonset_hr, y = prob)) + 
   geom_ribbon(aes(x=timefromshockonset_hr, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
   xlab('Time from shock onset, hours') + 
-  ylab('Predicted probability of in-hospital mortality, %') +
+  ylab('Predicted incidence of in-hospital mortality, %') +
   theme_light()
 ```
 
@@ -1460,8 +1636,9 @@ avptime3 <- glm(inhospital_mortality~ neqdoseatavp + lactateatavp + timefromshoc
 
 tidy(avptime3, exponentiate = TRUE, conf.int = TRUE, conf.level = 0.95) %>% select(term, estimate, std.error, low95=conf.low, high95=conf.high)
 ```
+
 ### Cubic Splines Regression
-Fitting logistic regression with cubic splines using 3 nodes for NEQ dose at AVP initiation
+Fitting logistic regression with cubic splines using 3 nodes for NEQ dose at AVP initiation.
 ```{r}
 fulldfsscoding <- fulldf %>% filter(include_exclude_sscoding == "include")
 fulldfsscoding$inhospital_mortality <- droplevels(fulldfsscoding$inhospital_mortality) # dropping unused level "Unknown"
@@ -1469,148 +1646,19 @@ fulldfsscoding$gender <- droplevels(fulldfsscoding$gender) # dropping unused lev
 ddist <- datadist(fulldfsscoding)
 options(datadist='ddist')
 
-cubavptime3 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,3) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldfsscoding, x=TRUE, y=TRUE)
+cubavptime3 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,3) + rcs(lactateatavp,3) + rcs(timefromshockonset_hr,3) + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldfsscoding, x=TRUE, y=TRUE)
 summary(cubavptime3)
 ```
 
-##### Values of where splines placed knots
-We can see the splines placed their knots at NEQ dose at AVP initiation of 9.1, 27.2, and 70.3 mcg/min
+Evaluation of non-linear test using analysis of variance reveals a p-value of 0.3183 indicating a linear trend with NEQ-dose, indicating cubic splines regression is not needed for this definition. Similarly, no detected non-linear trend with lactate at vasopressin initiation (p-value for nonlinear trend of 0.3997) or timing from shock onset (p-value for nonlinear trend of 0.7576).
 ```{r}
-knots <- attributes(rcs(fulldfsscoding$neqdoseatavp,3))
-knots$parms
-```
-
-#### Estimated Odds Ratios
-The reported estimated odds ratios for the final regression model utilizing cubic splines with three knots for NEQ dose at AVP initiation are reported below. Rather than using the clinically relevant breakpoints that were utilized in the original vasopressin timing evaluation (10, 25, and 60 mcg/min), will utilize the breakpoints detected by the knots in the cubic splines regression (9, 27, and 70 mcg/min)
-
-OR for NEQ Dose in model (comparing 41.95 vs. 16.2) - not reporting in manuscript, just running to ensure the subsequent code is correct
-```{r}
-summary(cubavptime3, neqdoseatavp)[c(40*3+2,40*5+2,40*6+2)]
-```
-
-Odds ratio comparing 27 mcg/min to 9 mcg/min. 
-```{r}
-summary(cubavptime3, neqdoseatavp=c(9,27))[c(40*3+2,40*5+2,40*6+2)]
-```
-
-Odds ratio comparing 70 mcg/min 9 mcg/min.
-```{r}
-summary(cubavptime3, neqdoseatavp=c(9,70))[c(40*3+2,40*5+2,40*6+2)]
-```
-
-Odds ratio comparing 70 mcg/min to 27 mcg/min
-```{r}
-summary(cubavptime3, neqdoseatavp=c(27,70))[c(40*3+2,40*5+2,40*6+2)]
-```
-
-Odds ratio for lactate concentration
-```{r}
-summary(cubavptime3, lactateatavp=c(1,2))[c(40*3+4,40*5+4,40*6+4)]
-```
-
-Odds ratio for time from shock onset
-```{r}
-summary(cubavptime3, timefromshockonset_hr=c(1,2))[c(40*3+6,40*5+6,40*6+6)]
-```
-
-#### Predicted Probabilities of In-Hospital Mortality
-The cubic splines model can be used to determine the predicted probability of in-hospital mortality based on the NEQ dose at vasopressin initiation (keeping all other variables within the model set as their median value or specified categorical variables). 
-
-The predicted probability of in-hospital mortality when vasopressin is initiated at a dose of 10 mcg/min of norepinephrine is 48.1% (95% CI 37.0-59.4%).
-
-```{r}
-probneq10 <- data.frame(Predict(cubavptime3, type = "predictions", neqdoseatavp = 10, lactateatavp = 3.5, timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male"))
-
-probneq10$prob <- logistic(probneq10$yhat)
-probneq10$prob.lower <- logistic(probneq10$lower)
-probneq10$prob.upper <- logistic(probneq10$upper)
-
-probneq10 %>% select(prob, prob.lower, prob.upper)
-```
-
-The predicted probability of in-hospital mortality when vasopressin is initiated at a dose of 25 mcg/min of norepinephrine is 55.7% (95% CI 45.4-65.5%).
-```{r}
-probneq25 <- data.frame(Predict(cubavptime3, type = "predictions", neqdoseatavp = 25, lactateatavp = 3.5, timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male"))
-
-probneq25$prob <- logistic(probneq25$yhat)
-probneq25$prob.lower <- logistic(probneq25$lower)
-probneq25$prob.upper <- logistic(probneq25$upper)
-
-probneq25 %>% select(prob, prob.lower, prob.upper)
-```
-
-The predicted probability of in-hospital mortality when vasopressin is initiated at a dose of 60 mcg/min of norepinephrine is 67.6% (95% CI 57.6-76.1%).
-```{r}
-probneq60 <- data.frame(Predict(cubavptime3, type = "predictions", neqdoseatavp = 60, lactateatavp = 3.5, timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male"))
-
-probneq60$prob <- logistic(probneq60$yhat)
-probneq60$prob.lower <- logistic(probneq60$lower)
-probneq60$prob.upper <- logistic(probneq60$upper)
-
-probneq60 %>% select(prob, prob.lower, prob.upper)
-```
-
-#### NEQ Dose Predicted In-Hospital Mortality Plot
-Creating plot of the predicted in-hospital mortality at each NEQ dose at the time of AVP initiation setting all confounding variables at their median values or specified the categorical data point as in prior studies
-```{r}
-#| warning: false
-#| message: false
-pred.neq <- as.data.frame(Predict(cubavptime3, type = "predictions", neqdoseatavp, lactateatavp = 3.5, timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male"))
-
-pred.neq$prob <- logistic(pred.neq$yhat)
-pred.neq$prob.lower <- logistic(pred.neq$lower)
-pred.neq$prob.upper <- logistic(pred.neq$upper)
-
-ggplot(pred.neq) +
-  geom_line(aes(x=neqdoseatavp, y = prob)) +
-  geom_ribbon(aes(x=neqdoseatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
-  xlab('Norepinephrine-equivalent dose at vasopressin initiation, mcg/min') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
-  scale_x_continuous(breaks=seq(0,160,by=20), limits=c(0,160)) +
-  scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
-  theme_light()
-```
-
-#### Lactate Concentration Predicted In-Hospital Mortality Plot
-```{r}
-#| warning: false
-#| message: false
-pred.lac <- as.data.frame(Predict(cubavptime3, type = "predictions", lactateatavp, neqdoseatavp = 27.2, timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male"))
-
-pred.lac$prob <- logistic(pred.lac$yhat)
-pred.lac$prob.lower <- logistic(pred.lac$lower)
-pred.lac$prob.upper <- logistic(pred.lac$upper)
-
-ggplot(pred.lac) +
-  geom_line(aes(x=lactateatavp, y = prob)) +
-  geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
-  xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
-  theme_light()
-```
-
-#### Time from Shock Onset Predicted In-Hospital Mortality Plot
-```{r}
-#| warning: false
-#| message: false
-pred.time <- as.data.frame(Predict(cubavptime3, type = "predictions", timefromshockonset_hr, lactateatavp=3.5, neqdoseatavp = 27.2, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male"))
-
-pred.time$prob <- logistic(pred.time$yhat)
-pred.time$prob.lower <- logistic(pred.time$lower)
-pred.time$prob.upper <- logistic(pred.time$upper)
-
-ggplot(pred.time) +
-  geom_line(aes(x=timefromshockonset_hr, y = prob)) +
-  geom_ribbon(aes(x=timefromshockonset_hr, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
-  xlab('Time from shock onset, hours') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
-  theme_light()
+anova(cubavptime3)
 ```
 
 ### Segmented Regression
-Similar to methods previously preformed in our initial study, piecewise segmented regression was utilized to determine the breakpoint at which the relationship between norepinephrine-equivalent dose at vasopressin initiation and in-hospital mortality changed.  This method estimates the change point of slope in NEQ-dose at AVP initiation, or the point at which the odds ratio of the association between NEQ-dose at AVP initiation and in-hospital mortality changes. The change point was detected at a NEQ dose of 42.281 mcg/min. This method utilized the segmented package and the [segmented function in R](https://cran.r-project.org/web/packages/segmented/segmented.pdf)
+Similar to methods previously preformed in our initial study, piecewise segmented regression was utilized to determine the breakpoint at which the relationship between norepinephrine-equivalent dose at vasopressin initiation and in-hospital mortality changed.  This method did not estimate a change point for any of the three variables of interest (all had confidence intervals that went below zero). This method utilized the segmented package and the [segmented function in R](https://cran.r-project.org/web/packages/segmented/segmented.pdf)
 
-However, you can see that the 95% CI for the change point crosses zero and thus does not make clinical sense. Because of this, would not pursue segmented regression for the population based on septic shock diagnostic coding.
+You can see that the 95% CI for the change point crosses zero and thus does not make clinical sense. Because of this, would not pursue segmented regression for the population based on septic shock diagnostic coding.
 ```{r}
 segavptime3 <- segmented(avptime3, ~neqdoseatavp, control=seg.control(size.boot = 8000, display=TRUE, seed=1234))
 summary.segmented(segavptime3)
@@ -1619,76 +1667,43 @@ summary.segmented(segavptime3)
 With an associated estimated 95% Confidence interval for the change point of:
 ```{r}
 # 95% CI for change point
-confint.segmented(segavptime3)
+confint(segavptime3,"neqdoseatavp")
 ```
 
-#### Converting beta coefficients to Odds Ratios
-Will only be reporting the odds ratio with corresponding 95% confidence intervals for the three variables of interest and the remaining independent variables included in the model are only noted as confounders that were adjusted for in the final model. The association of these independent variables on the dependent outcome (in-hospital mortality) is not relevant to this study. 
-
-##### Norepinephrine-Equivalent Dose at Vasopressin Initiation
-*Adjusting the units of the variable from 1 to 10 mcg/min*\
-Slope 1 is the OR with 95% CI up until the change point of 42.28 mcg/min. Slope 2 is the OR with 95% CI for all doses after the change point of 42.28 mcg/min. The OR reference unit is for every 10 mcg/min increase in the NEQ dose at the time of AVP initiation.  
+### Final Model
+For the septic shock by ICD-10 coding, logistic regression without the use of cubic splines or segmented regression will be utilized. 
 ```{r}
-segoutput3 <- as.data.frame(slope(segavptime3)) %>%
-  mutate(OR = exp(neqdoseatavp.Est.)^10,
-         LB95CI = exp(neqdoseatavp.CI.95...l)^10,
-         UB95CI = exp(neqdoseatavp.CI.95...u)^10) %>%
-  select(OR, LB95CI, UB95CI)
-segoutput3
+#| warning: false
+#| message: false
+avptime3 <- glm(inhospital_mortality~ neqdoseatavp + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, family = binomial(link = "logit"), data = fulldf, subset = include_exclude_sscoding == "include")
+
+tidy(avptime3, exponentiate = TRUE, conf.int = TRUE, conf.level = 0.95) %>% select(term, estimate, std.error, low95=conf.low, high95=conf.high)
 ```
+Estimated Odds Ratios for NEQ-dose at vasopressin initiation changing the reference value to 10 mcg/min increase in NEQ dose at the time of vasopressin initiation. 
 
-
-##### Lactate Concentration at Vasopressin Initiation
-*The units of lactate are 1 mmol/L*\
-The first line of code is the odds ratio for the lactate concentration at AVP initiation with the second and third line being the lower and upper bound of the 95% confidence interval.
 ```{r}
-model3 <- summary.segmented(segavptime3)
-exp(model3$coefficients[3,1])
-exp(model3$coefficients[3,1] - 1.96*model3$coefficients[3,2]) # lower bound of 95% CI
-exp(model3$coefficients[3,1] + 1.96*model3$coefficients[3,2]) # upper bound of 95% CI
+model3 <- summary(avptime3)
+exp(model3$coefficients[2,1])^10
+exp(model3$coefficients[2,1] - 1.96*model3$coefficients[4,2])^10 # lower bound of 95% CI
+exp(model3$coefficients[2,1] + 1.96*model3$coefficients[4,2])^10 # upper bound of 95% CI
 ```
-
-
-##### Timing between Shock Onset and Vasopressin Initiation 
-*The units of time are 1 hour*\
-The first line of code is the odds ratio for the time between shock onset and AVP initiation with the second and third line being the lower and upper bound of the 95% confidence interval.
-```{r}
-exp(model3$coefficients[4,1])
-exp(model3$coefficients[4,1] - 1.96*model3$coefficients[4,2]) # lower bound of 95% CI
-exp(model3$coefficients[4,1] + 1.96*model3$coefficients[4,2]) # upper bound of 95% CI
-```
-
 
 #### NEQ Predictive In-hospital Mortality Plot
 Created a new dataframe of values of NEQ doses 0 to 200 mcg/min and set all other confounding variables at their median values or specified the categorical data point as in prior studies
 ```{r}
 pred.neq <- data.frame(neqdoseatavp = seq(0,200,by = 0.01))
-pred.neqdf <- data.frame(neqdoseatavp = seq(0,200,by = 0.01), lactateatavp = 3.5,
-                         timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV",
-                         sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", 
-                         iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male")
+pred.neqdf <- data.frame(neqdoseatavp = seq(0,200,by = 0.01), lactateatavp = 3.5, timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male")
 
-pred.neq.1 <- predict(segavptime3, newdata =pred.neqdf, se.fit=T)
+pred.neq.1 <- predict(avptime3, newdata =pred.neqdf, se.fit=T)
 pred.neq$prob <- logistic(pred.neq.1$fit)
 pred.neq$prob.lower <- logistic(pred.neq.1$fit-1.96*pred.neq.1$se.fit)
 pred.neq$prob.upper <- logistic(pred.neq.1$fit+1.96*pred.neq.1$se.fit)
 
-knots.ca <- 42.3
-ypos.ca <- 0.636
-arrow.y <- 0.90
-arrow.yend <-ypos.ca+0.01
-ds.knots.ca <- as.data.frame(cbind(knots.ca,ypos.ca,arrow.y,arrow.yend))
-
 ggplot(pred.neq) + 
   geom_line(aes(x=neqdoseatavp, y = prob)) + 
   geom_ribbon(aes(x=neqdoseatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
-  geom_point(data=ds.knots.ca, aes(x=knots.ca,y=ypos.ca)) +
-  geom_segment(data=ds.knots.ca, aes(x=knots.ca, xend=knots.ca, y=arrow.y, yend=arrow.yend), 
-               color="grey30", size=0.5, linetype="longdash",
-               arrow = arrow(length = unit(0.15, "cm"), type="closed")) +
-  geom_text(data=ds.knots.ca, aes(x=knots.ca, y=arrow.y+0.01, label=knots.ca), size=3) +
   xlab('Norepinephrine-equivalent dose at vasopressin initiation, mcg/min') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_x_continuous(breaks=seq(0,200,by=20), limits=c(0,200)) +
   scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
@@ -1700,12 +1715,9 @@ Created a new dataframe of values of lactate concentrations 0 to 30 mmol/L and s
 pred.lac <- data.frame(lactateatavp = seq(0,30,by = 0.01)) # sequence of NEQ values at AVP initiation starting at 0
 
 # setting values as median unless otherwise specified
-pred.lacdf <- data.frame(lactateatavp = seq(0,30,by = 0.01), neqdoseatavp = 27.2,
-                         timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV",
-                         sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", 
-                         iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male")
+pred.lacdf <- data.frame(lactateatavp = seq(0,30,by = 0.01), neqdoseatavp = 27.2, timefromshockonset_hr = 5.8, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No",iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male")
 
-pred.lac.1 <- predict(segavptime3, newdata = pred.lacdf, se.fit=TRUE)
+pred.lac.1 <- predict(avptime3, newdata = pred.lacdf, se.fit=TRUE)
 logistic <- plogis
 pred.lac$prob <- logistic(pred.lac.1$fit)
 pred.lac$prob.lower <- logistic(pred.lac.1$fit-1.96*pred.lac.1$se.fit)
@@ -1715,7 +1727,8 @@ ggplot(pred.lac) +
   geom_line(aes(x=lactateatavp, y = prob)) + 
   geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
   xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
+  scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) +
   theme_light()
 ```
 
@@ -1725,12 +1738,9 @@ Created a new data frame of values of time from shock onset to vasopressin initi
 pred.time <- data.frame(timefromshockonset_hr = seq(0,48,by = 0.01)) 
 
 # setting values as median unless otherwise specified
-pred.timedf <- data.frame(timefromshockonset_hr = seq(0,48,by = 0.01), neqdoseatavp = 27.2,
-                          lactateatavp = 3.5, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV",
-                          sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", 
-                          iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male")
+pred.timedf <- data.frame(timefromshockonset_hr = seq(0,48,by = 0.01), neqdoseatavp = 27.2, lactateatavp = 3.5, age=65, weight=80, akimva = "No AKI", database = "MIMIC-IV", sofa_baseline=9, totalfluidbolus = 1000, fluidbalance=9700, immune_suppression="No", iculocation = "MICU", hydrocortuse = "Yes", mv_baseline = "Yes", race = "White", gender = "Male")
 
-pred.time.1 <- predict(segavptime3, newdata = pred.timedf, se.fit=TRUE)
+pred.time.1 <- predict(avptime3, newdata = pred.timedf, se.fit=TRUE)
 logistic <- plogis
 pred.time$prob <- logistic(pred.time.1$fit)
 pred.time$prob.lower <- logistic(pred.time.1$fit-1.96*pred.time.1$se.fit)
@@ -1740,11 +1750,11 @@ ggplot(pred.time) +
   geom_line(aes(x=timefromshockonset_hr, y = prob)) + 
   geom_ribbon(aes(x=timefromshockonset_hr, ymin=prob.lower, ymax=prob.upper), alpha=0.3) +
   xlab('Time from shock onset, hours') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+ 
+  scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) +
   theme_light()
 
 ```
-
 
 # Septic Shock by Angus Criteria
 ## Reviewing Number of Patients
@@ -1911,8 +1921,81 @@ cubavptime4 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,3) + lactateatavp + ti
 summary(cubavptime4)
 ```
 
+Evaluation of non-linear test using analysis of variance reveals a p-value of <0.001 indicating and supporting the presence of a non-linear trend with NEQ-dose at vasopressin initiation. Evaluating only NE-equivalent dose with restricted cubic splines as no detected non-linear trend with lactate at vasopressin initiation (p-value for nonlinear trend of 0.0523) or timing from shock onset (p-value for nonlinear trend of 0.9206): data not shown but can be reran if needed.
+```{r}
+anova(cubavptime4)
+```
 
-##### Values of where splines placed knots
+#### Evaluation of the number of nodes (3 vs. 4 vs. 5)
+Now run the model with `glm()` instead of `lrm()` to be able to easily get fit parameters.
+
+```{r}
+cubavptime_g3 <- glm(inhospital_mortality~ rcs(neqdoseatavp,3) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, 
+                    data = fulldfangus, 
+                    family =binomial(link =logit))
+```
+
+Next, run the model with 4 and 5 knots in the spline instead of 3 (using both `lrm()` and `glm()`).
+
+```{r}
+cubavptime_l4 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,4) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldfangus, x=TRUE, y=TRUE)
+
+cubavptime_g4 <- glm(inhospital_mortality~ rcs(neqdoseatavp,4) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, 
+                    data = fulldfangus, 
+                    family =binomial(link =logit))
+
+cubavptime_l5 <- lrm(inhospital_mortality~ rcs(neqdoseatavp,3) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, data = fulldfangus, x=TRUE, y=TRUE)
+
+cubavptime_g5 <- glm(inhospital_mortality~ rcs(neqdoseatavp,5) + lactateatavp + timefromshockonset_hr + age + weight + mv_baseline + akimva + sofa_baseline + totalfluidbolus + fluidbalance + gender + race + immune_suppression + database + iculocation + hydrocortuse, 
+                    data = fulldfangus, 
+                    family =binomial(link =logit))
+```
+
+Now store fit statistics (AIC and BIC) for the models.
+
+```{r}
+temp1 <- bind_rows(glance(cubavptime_g3), 
+                   glance(cubavptime_g4),
+                   glance(cubavptime_g5)) |>
+  mutate(model = c("3 knots", "4 knots", "5 knots"),
+         AIC = round_half_up(AIC, 0),
+         BIC = round_half_up(BIC, 0)) |>
+  select(model, AIC, BIC)
+```
+
+Now validate the model fit (summary statistics) using bootstrap resampling (40 resamples). 
+
+```{r}
+set.seed(1234)
+val3 <- validate(cubavptime, B = 40)
+val4 <- validate(cubavptime_l4, B = 40)
+val5 <- validate(cubavptime_l5, B = 40)
+```
+
+Singularity created due to the ESRD variable due to few observations in this category. Nothing much to worry about in this regard.
+
+Now will show the validated fit parameters.
+
+```{r}
+val_1 <- bind_rows(val3[1,], val4[1,], val5[1,]) |>
+  mutate(model = c("3 knots", "4 knots", "5 knots"),
+         AUC_nominal = round_half_up(0.5 + (index.orig/2),4),
+         AUC_validated = round_half_up(0.5 + (index.corrected/2),4)) |>
+select(model, AUC_nominal, AUC_validated)
+
+val_2 <- bind_rows(val3[2,], val4[2,], val5[2,]) |>
+  mutate(model = c("3 knots", "4 knots", "5 knots"),
+         R2_nominal = round_half_up(index.orig,4),
+         R2_validated = round_half_up(index.corrected,4)) |>
+select(model, R2_nominal, R2_validated)
+
+temp2 <- left_join(temp1, val_1, by = "model")
+(val <- left_join(temp2, val_2, by = "model"))
+```
+
+3-knot model is best for this sensitivity analysis. 
+
+#### Values of where splines placed knots
 We can see the splines placed their knots at NEQ dose at AVP initiation of 9.0, 27.3, and 71.3 mcg/min
 ```{r}
 knots <- attributes(rcs(fulldfangus$neqdoseatavp,3))
@@ -2004,7 +2087,7 @@ ggplot(pred.neq) +
   geom_line(aes(x=neqdoseatavp, y = prob)) +
   geom_ribbon(aes(x=neqdoseatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Norepinephrine-equivalent dose at vasopressin initiation, mcg/min') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
   scale_x_continuous(breaks=seq(0,160,by=20), limits=c(0,160)) +
   scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) + 
   theme_light()
@@ -2024,7 +2107,8 @@ ggplot(pred.lac) +
   geom_line(aes(x=lactateatavp, y = prob)) +
   geom_ribbon(aes(x=lactateatavp, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Lactate concentration at vasopressin initiation, mmol/L') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+  
+  scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) +
   theme_light()
 ```
 
@@ -2042,21 +2126,24 @@ ggplot(pred.time) +
   geom_line(aes(x=timefromshockonset_hr, y = prob)) +
   geom_ribbon(aes(x=timefromshockonset_hr, ymin=prob.lower, ymax=prob.upper), alpha=0.3) + 
   xlab('Time from shock onset, hours') + 
-  ylab('Predicted rate of in-hospital mortality, %')+
+  ylab('Predicted incidence of in-hospital mortality, %')+
+  scale_y_continuous(breaks=seq(.2,1,by=.1), limits=c(.2,1), labels = scales::percent_format(accuracy = 1)) +
   theme_light()
 ```
 
 ### Segmented Regression
 When running segmented regression on the NEQ dose at the time of AVP initiation, no change point was detected when defining and identifying patients with septic shock based on the Angus criteria. 
 ```{r}
-segavptime4 <- segmented(avptime4, ~neqdoseatavp, control=seg.control(size.boot = 8000, display=TRUE, seed=1234))
+segavptime4 <- segmented(avptime4, ~neqdoseatavp+lactateatavp+timefromshockonset_hr, control=seg.control(size.boot = 8000, display=TRUE, seed=1234))
 summary.segmented(segavptime4)
 ```
 
 This is evident by the 95% Confidence interval
 ```{r}
 # 95% CI for change point
-confint.segmented(segavptime4)
+confint(segavptime4, "neqdoseatavp")
+confint(segavptime4, "lactateatavp")
+confint(segavptime4, "timefromshockonset_hr")
 ```
 And the corresponding estimated Odds Ratio for NEQ dose at AVP initiation
 ```{r}
@@ -2068,4 +2155,4 @@ segoutput4 <- as.data.frame(slope(segavptime4)) %>%
 segoutput4
 ```
 
-Moving forward, for the Angus criteria, will not report out results of the segmented regression. 
+Moving forward, for the Angus criteria, will not report out results of the segmented regression and just report out cubic splines regression results. 
